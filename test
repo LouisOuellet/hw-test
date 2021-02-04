@@ -1,0 +1,373 @@
+#!/bin/bash
+#==============================================================================
+#TITLE:            test
+#DESCRIPTION:      This script was build to provide an easy to use hardware testing utility
+#AUTHOR:           Louis Ouellet
+#DATE:             2021-02-02
+#VERSION:          1.1-1
+
+#==============================================================================
+# BASH SETUP
+#==============================================================================
+
+# Initialize Timer
+SECOND=0
+
+# Script name
+scriptname=$(echo $0 | sed -e 's@.*/@@')
+
+# Script Personalisation
+Title=""
+help_options="
+-a                     => Execute all tests (CPU,RAM,HDD)
+-t                     => Specify which test to run
+-c                     => Change the timeout for the CPU test, default(60)
+-r                     => Change the amount of loops in the RAM test, default(25)
+-h                     => Specify which disks to test, default(all)
+-v                     => Enable Reporting Mode
+                          Input commands sent are stored in ${logs_file}
+-e                     => Compile errors and warnings after execution
+-s                     => Send report via email
+-f                     => Disable all formatting
+"
+help_functions="
+"
+
+# Set Bash
+set -o pipefail
+
+# Set Default Settings
+time="60m"
+loops=25
+disks=$(df -h --type btrfs --type ext4 --type ext3 --type ext2 --type vfat --type iso9660 --type xfs --type zfs --type fuseblk | grep /dev/ | awk {' print $1 '} | sed -e 's/[0-9]*//g' | sed -e 's/\/dev\///g')
+disks=$(echo "${disks[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+
+# SETS LOCALE
+# Updated to en_US to support
+#export LC_ALL=en_US.UTF-8 > /dev/null 2>&1 || export LC_ALL=en_GB.UTF-8 > /dev/null 2>&1 || export LC_ALL=C.UTF-8 > /dev/null 2>&1
+
+#==============================================================================
+# FORMATTING
+#==============================================================================
+
+function format(){
+    # COLORS
+    blackText=$(tput setaf 0)   # Black
+    redText=$(tput setaf 1)     # Red
+    greenText=$(tput setaf 2)   # Green
+    yellowText=$(tput setaf 3)  # Yellow
+    blueText=$(tput setaf 4)    # Blue
+    magentaText=$(tput setaf 5) # Magenta
+    cyanText=$(tput setaf 6)    # Cyan
+    whiteText=$(tput setaf 7)   # White
+    resetText=$(tput sgr0)      # Reset to default color
+
+    # STYLES
+    boldText=$(tput bold)
+    blinkingText=$(tput blink)
+    dimText=$(tput dim)
+}
+
+function clrformat(){
+    # COLORS
+    blackText=
+    redText=
+    greenText=
+    yellowText=
+    blueText=
+    magentaText=
+    cyanText=
+    whiteText=
+    resetText=
+
+    # STYLES
+    boldText=
+    blinkingText=
+    dimText=
+}
+
+#==============================================================================
+# Elements
+#==============================================================================
+
+function elements(){
+    # CHECK BOXES
+    checkBoxGood="[${greenText}✓${resetText}]"       # Good
+    checkBoxBad="[${redText}✗${resetText}]"          # Bad
+    checkBoxQuestion="[${magentaText}?${resetText}]"  # Question / ?
+    checkBoxInfo="[${cyanText}i${resetText}]"      # Info / i
+    checkBoxOutput="[${yellowText}!${resetText}]"      # Output / !
+
+    # Current Date & Time
+    PDATE(){
+	    printf "[$(date '+%Y-%m-%d %H:%M:%S')]"
+    }
+
+    # Log Types
+    INFO=$checkBoxInfo
+    OUTPUT=$checkBoxOutput
+    SUCCESS=$checkBoxGood
+    ERROR=$checkBoxBad
+    WARNING=$checkBoxOutput
+
+    # Log Actions
+    CHECK="[CHECK]"
+    START="[START]"
+    TIMED="[TIMED]"
+    RUN="[ RUN ]"
+    EMPT="[     ]"
+    OUT="[ OUT ]"
+    VAR="[ VAR ]"
+}
+
+#==============================================================================
+# HELPERS
+#==============================================================================
+
+function help(){
+  if [ "$DEBUG" = "true" ]; then
+    echo "Help" | dbg i s
+  fi
+  echo -e "
+Usage: ./$scriptname [options]
+
+Options:
+$help_options
+"
+}
+
+function error(){
+  printf "FATAL ERROR: $1\n"
+  help
+  exit 0
+}
+
+function dbg(){
+  if [ "$1" != "" ] && [ "$2" != "" ]; then
+    case "$1" in
+      info|i)
+        TYPE=$INFO
+        ;;
+      success|s)
+        TYPE=$SUCCESS
+        ;;
+      error|e)
+        TYPE=$ERROR
+        ;;
+      output|o)
+        TYPE=$OUTPUT
+        ;;
+      warning|w)
+        TYPE=$WARNING
+        ;;
+      question|q)
+        TYPE=$checkBoxQuestion
+        ;;
+    esac
+    case "$2" in
+      check|c|test|t)
+        ACTION=$CHECK
+        ;;
+      start|s)
+        ACTION=$START
+        ;;
+      run|r)
+        ACTION=$RUN
+        ;;
+      empty|e)
+        ACTION=$EMPT
+        ;;
+      output|o)
+        ACTION=$OUT
+        ;;
+      timed|t)
+        ACTION=$TIMED
+        ;;
+      variable|var|v)
+        ACTION=$VAR
+        ;;
+    esac
+    while read DCMD; do
+      if [ "$3" != "" ]; then
+        LogFile=$3
+      fi
+			DCMDout=$(echo $DCMD | sed -e "s/\n/ /g")
+			for string in ${protect[@]};do
+				DCMDout=$(echo $DCMDout | sed -e "s/$string/xxx/g")
+			done
+      if [ "$DEBUG" = "true" ]; then
+        printf "${TYPE}$(PDATE)${ACTION} ${DCMDout}\n" | tee -a $logs_file
+      else
+        printf "${TYPE}$(PDATE)${ACTION} ${DCMDout}\n"
+      fi
+    done
+  else
+    error "Missing Argument(s)"
+  fi
+}
+
+function exec(){
+  if [ "$1" != "" ]; then
+    echo "exec $1" | dbg i s
+    if eval $1 2>&1 | dbg o o;then
+      echo "$1" | dbg s r
+    else
+      echo "$1" | dbg e r
+    fi
+  else
+    error "Missing Argument(s)"
+  fi
+}
+
+function pkg(){
+  if [ "$1" != "" ]; then
+    if [ "$DEBUG" = "true" ]; then
+      echo "pkg $1" | dbg i s
+    fi
+    if [ $(dpkg-query -W -f='${Status}' $1 2>/dev/null | grep -c "ok installed") -eq 0 ]; then
+      exec "sudo apt-get update"
+      exec "sudo apt-get install --fix-missing $1 -y"
+    fi
+  else
+    error "Missing Argument(s)"
+  fi
+}
+
+function send(){
+    exec "echo \"$2\" | s-nail -s \"$1\" -S smtp-use-ssl -S ssl-rand-file=/tmp/mail.entropy -S smtp-auth=login -S smtp=\"smtps://${smtp_host}:${smtp_port}\" -S from=\"${send_from}(${send_name})\" -S smtp-auth-user=\"${smtp_username}\" -S smtp-auth-password=\"${smtp_password}\" -S ssl-verify=ignore -a \"$logs_file\" ${send_to}"
+}
+
+#==============================================================================
+# SETTINGS
+#==============================================================================
+
+
+function protectDCMD(){
+	protect=(
+		$smtp_host
+		$smtp_port
+		$smtp_username
+		$smtp_password
+		$send_name
+		$send_from
+	)
+}
+
+function import(){
+  smtp_host=$(jq -r '.smtp.host' settings.json)
+  smtp_port=$(jq -r '.smtp.port' settings.json)
+  smtp_username=$(jq -r '.smtp.username' settings.json)
+  smtp_password=$(jq -r '.smtp.password' settings.json)
+  send_name=$(jq -r '.send.name' settings.json)
+  send_from=$(jq -r '.send.from' settings.json)
+  send_to=$(jq -r '.send.to' settings.json)
+  logs_directory=$(jq -r '.logs.directory' settings.json)
+  logs_file="${logs_directory}$(date +%s%N).log"
+	protectDCMD
+}
+
+#==============================================================================
+# FUNTIONS
+#==============================================================================
+
+function info(){
+	pkg hwinfo
+	hwinfo --short | dbg i e
+	hwinfo --memory | dbg i e
+}
+
+function cpu(){
+	pkg stress
+	pkg stress-ng
+	pkg lm-sensors
+	threads=$(lscpu -J | jq .lscpu[4].data | sed -e 's/"//g')
+	echo "Amount of threads: ${threads}" | dbg i v
+	echo "Testing for: ${time}" | dbg i v
+	# Detecting sensors
+	exec "yes | sudo sensors-detect"
+	# Single Core
+	exec "sudo stress-ng --cpu $threads --timeout $time --times" &
+	pid=$!
+	while :;do
+		if kill -0 $pid 2> /dev/null; then
+			clear
+	    sensors
+	    sleep 0.5
+		else
+			exec "sensors"
+			break
+		fi
+	done
+}
+
+function ram(){
+	pkg memtester
+	amount=$(free -m | grep Mem: | awk {' print $4 '})
+	echo "Amount of ram(mb): ${amount}" | dbg i v
+	exec "sudo memtester $amount $loops"
+	exec "sudo rm -vfr tmp-stress-ng-*"
+}
+
+function hdd(){
+	pkg smartmontools
+	echo "List of disks: ${disks}" | dbg i v
+	for disk in $disks; do
+		sudo smartctl -i /dev/$disk | dbg i e
+	done
+}
+
+#==============================================================================
+# RUN OPTIONS & FUNCTIONS
+#==============================================================================
+
+format
+elements
+pkg jq
+pkg s-nail
+import
+info
+
+while getopts ":vesfat:c:h:r:" option
+	do
+	case "${option}"
+		in
+			v) DEBUG=true;;
+			e) ERRORrpt=true;;
+			c) time="${OPTARG}m";;
+			r) loops=$OPTARG;;
+			h) disks=$OPTARG;;
+			a) cpu;hdd;;
+			t)
+				for test in $OPTARG; do
+					if [ "$(type -t $test)" == "function" ]; then eval $test; else echo "Unknown test: $test" | dbg e t; fi
+				done
+				;;
+			s) SENDrpt=true;;
+			f) clrformat;elements;;
+			\?) echo "Invalid option: $OPTARG" 1>&2;help;exit 0;;
+			:) echo "Invalid option: $OPTARG requires an argument" 1>&2;help;exit 0;;
+	esac
+done
+shift $((OPTIND -1))
+
+#==============================================================================
+# RUN SCRIPT
+#==============================================================================
+
+if [ "$DEBUG" = "true" ]; then
+    duration=$SECONDS
+    echo "#############################################################" | dbg i e
+    echo "log file.......: $logs_file" | dbg i v
+    echo "$(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed." | dbg i v
+    echo "#############################################################" | dbg i e
+fi
+
+if [ "$SENDrpt" = "true" ]; then
+    send "Test Report"
+fi
+
+if [ "$ERRORrpt" = "true" ]; then
+    cat $logs_file | egrep "✗|!"
+fi
+
+exit 0
