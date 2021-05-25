@@ -1,16 +1,16 @@
 {
-    "smtp":{
-        "host": "smtp.domain.com",
-        "port": "465",
-        "username": "smtp@domain.com",
-        "password": "password"
-    },
-    "send":{
-        "name": "Monitoring",
-        "from": "monitoring@domain.com",
-        "to": "mailinglist@domain.com"
-    },
-    "logs":{
-        "directory": "/tmp/"
-    }
+  "smtp":{
+    "host": "webman-01.albcie.com",
+    "port": "465",
+    "username": "itmr@albcie.com",
+    "password": "rvgpxD#PZ8Y"
+  },
+  "send":{
+    "name": "Monitoring",
+    "from": "monitoring@albcie.com",
+    "to": "louis@albcie.com"
+  },
+  "logs":{
+    "directory": "/tmp/"
+  }
 }
